@@ -17,3 +17,7 @@ A lightning rod for Super-Resolution (or more) projects!
     - [ ] local testing
     - [ ] CI testing
 - [ ] publish to PyPI
+
+
+## Acknowledgements
+- Pre-trained weights of some networks in this project are obtained from https://github.com/open-mmlab/mmediting
