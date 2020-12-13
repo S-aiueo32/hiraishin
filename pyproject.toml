@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "hiraishin"
+version = "0.1.0"
+description = "Lightning Toolbox for Super-Resolution"
+authors = ["so.uchida <s.aiueo32@gmail.com>"]
+license = "Apache 2.0"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pytorch-lightning = "^1.0.8"
+hydra-core = "^1.0.4"
+torchvision = "^0.8.1"
+kornia = "^0.4.1"
+overrides = "^3.1.0"
+
+[tool.poetry.dev-dependencies]
+flake8 = "^3.8.4"
+autopep8 = "^1.5.4"
+pytest = "^6.1.2"
+TorchSnooper = "^0.8"
+jupyterlab = "^2.2.9"
+matplotlib = "^3.3.3"
+
+[tool.poetry.scripts]
+hiraishin-generate = "hiraishin.console:generate_config"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
