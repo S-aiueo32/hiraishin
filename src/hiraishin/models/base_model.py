@@ -1,30 +1,43 @@
 import inspect
-import logging
-from abc import ABCMeta, abstractmethod
-from itertools import chain
-from typing import List
+import itertools
+from abc import ABCMeta
+from logging import getLogger
+from typing import Any, Dict, List
 from pathlib import Path
 
-import hydra
+import torch.nn as nn
+import torch.optim as optim
+from hydra.utils import instantiate
 from omegaconf import OmegaConf, DictConfig
+from overrides import final
+from pytorch_lightning import LightningModule
 
-import torch
-import pytorch_lightning as pl
+from hiraishin.schema import ModelConfig
+from hiraishin.utils import get_arguments, get_class_name_with_shortest_module
+from hiraishin.models.utils import init_weights, load_weights
 
-from .networks import init_weights
-from .losses import PSNR, SSIM, LPIPS
-
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 
-class BaseModel(pl.LightningModule, metaclass=ABCMeta):
+class BaseModel(LightningModule, metaclass=ABCMeta):
 
-    def initialize(self, config: DictConfig):
+    @final
+    def initialize(self, config: ModelConfig.ConfigBody):
         """calls __init__() of BaseModel with sub-module information.
         """
-        super(self.__class__, self).__init__(config, inspect.getmodule(self).__name__ + '.' + self.__class__.__name__)
+        super(self.__class__, self).__init__(self.__class__._target_(), config)
 
-    def __init__(self, config: DictConfig, _target_: str):
+    @final
+    @classmethod
+    def _target_(cls) -> str:
+        """Get the shortest module name that is importable from the current directory.
+        """
+        return get_class_name_with_shortest_module(cls)
+
+    def __init__(self, _target_: str, config: ModelConfig.ConfigBody):
+
+        assert (caller := inspect.stack()[1]).function == 'initialize' or caller.filename == __file__,\
+            f'The constructor of BaseModel can only be called through initialize() from the subclass {_target_}.'
 
         super().__init__()
 
@@ -34,49 +47,84 @@ class BaseModel(pl.LightningModule, metaclass=ABCMeta):
         self.define_networks()
         self.define_losses()
         self.define_optimizers()
-        self.define_schedulers()
-        self.define_metrics()
 
         self.validation()
 
-    def define_networks(self) -> None:
-        """
-        """
-        for key, value in self.config.networks.items():
-            setattr(self, key, hydra.utils.instantiate(value.args))
-            init_weights(getattr(self, key), **value.init)
+    @final
+    def define_networks(self):
+        for net_config in self.config.networks:
+            # network definition
+            net = instantiate(net_config.args)
 
-    def define_losses(self) -> None:
-        """
-        """
-        for key, value in self.config.losses.items():
-            setattr(self, key, hydra.utils.instantiate(value.args))
-            setattr(self, key.replace('criterion', 'weight'), value.weight)
+            # network initialization with random weights
+            kwargs = {}
+            if 'init_type' in net_config.init and net_config.init.init_type is not None:
+                kwargs.update({'init_type': net_config.init.init_type})
+            if 'init_gain' in net_config.init and net_config.init.init_gain is not None:
+                kwargs.update({'init_gain': net_config.init.init_gain})
+            init_weights(net, **kwargs)
 
+            # loading pretrained models
+            if 'weight_path' in net_config.init:
+                if isinstance(net_config.init.weight_path, str):  # for whole network
+                    load_weights(net, net_config.init.weight_path, net_config.name)
+                if isinstance(net_config.init.weight_path, DictConfig):  # for partial modules
+                    for module_name, path in net_config.init.weight_path.items():
+                        if Path(path).suffix != '.pth':
+                            raise ValueError('The weights for partial modules must be pure .pth')
+                        load_weights(getattr(net, module_name), path)
+
+            # set as an attribute
+            setattr(self, net_config.name, net)
+
+    @final
+    def define_losses(self):
+        for loss_config in self.config.losses:
+            setattr(self, loss_config.name, instantiate(loss_config.args))
+            if 'weight' in loss_config:
+                setattr(self, loss_config.name.replace('criterion', 'weight'), loss_config.weight)
+
+    @final
     def define_optimizers(self):
-        """
-        """
-        for key, value in self.config.optimizers.items():
-            params = chain(*[getattr(self, net).parameters() for net in value.params])
-            setattr(self, key, hydra.utils.instantiate(value.args, params))
+        for config in self.config.optimizers:
+            targets: List[nn.Module] = [getattr(self, net) for net in config.params]
+            optimizer = instantiate(config.args, itertools.chain(*[net.parameters() for net in targets]))
+            setattr(self, config.name, optimizer)
 
-    def define_schedulers(self):
-        """
-        """
-        for key, value in self.config.schedulers.items():
-            optimizer = getattr(self, value.optimizer)
-            setattr(self, key, hydra.utils.instantiate(value.args, optimizer))
+            if 'scheduler' in config and config.scheduler is not None:
+                scheduler = instantiate(config.scheduler.args, optimizer)
+            else:
+                scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.)
+            setattr(self, config.name.replace('optimizer', 'scheduler'), scheduler)
 
-    def define_metrics(self):
-        """defines metric calculators. currently PSNR, SSIM and LPIPS are defined here.
-        """
-        self.psnr = PSNR()
-        self.ssim = SSIM()
-        self.lpips = LPIPS()
+    @final
+    def define_modules(self):
+        for module_config in self.config.modules:
+            setattr(self, module_config.name, instantiate(module_config.args))
 
+    @final
+    def configure_optimizers(self):
+        optim_list, sched_list = [], []
+        for config in self.config.optimizers:
+            optimizer = getattr(self, config.name)
+            optim_list.append(optimizer)
+
+            sched_dict = {
+                'scheduler': instantiate(config.scheduler.args, optimizer),
+                'interval': config.scheduler.interval if 'interval' in config.scheduler else 'epoch',
+                'name': f'lr/{config.name}'
+            }
+            if isinstance(sched_dict['scheduler'], optim.lr_scheduler.ReduceLROnPlateau):
+                sched_dict.update({
+                    'reduce_on_plateau': True,
+                    'monitor': config.scheduler.monitor if 'monitor' in config.scheduler else 'loss/val',
+                    'strict': config.scheduler.strict if 'strict' in config.scheduler else True
+                })
+            sched_list.append(sched_dict)
+        return optim_list, sched_list
+
+    @final
     def validation(self):
-        """validates provided configs.
-        """
         is_valid: List[bool] = []
         for k, v in self.__class__.__dict__.get('__annotations__').items():
             if not hasattr(self, k):
@@ -93,139 +141,136 @@ class BaseModel(pl.LightningModule, metaclass=ABCMeta):
         else:
             raise ValueError('model initialization failed because of above errors.')
 
-    @abstractmethod
-    def configure_optimizers(self, *args, **kwargs):
-        """write a method returns optimizers and schedulers as you want．
-        """
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_inputs(*args, **kwargs):
-        """
-        """
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_gt(*args, **kwargs):
-        """
-        """
-        pass
-
-    @abstractmethod
-    def forward(self, *args, **kwargs):
-        """write a prediction routine which can be used in validation/test loop
-        """
-        pass
-
-    @abstractmethod
-    def training_step(self, *args, **kwargs):
-        """write a training routine incluing data unpackings, predictions, loss computations etc.
-        """
-        pass
-
-    @torch.no_grad()
-    def validation_step(self, batch, batch_idx: int):
-        outputs = self.forward(self.get_inputs(batch))
-        if (gt := self.get_gt(batch)) is not None:
-            if min(self.config.val_range) == -1.:
-                outputs, gt = (outputs + 1) / 2, (gt + 1) / 2
-            psnr = self.psnr(outputs, gt)
-            ssim = self.ssim(outputs, gt)
-            lpips = self.lpips(outputs, gt, retPerLayer=False, normalize=True)
-            return {'psnr': psnr, 'ssim': ssim, 'lpips': lpips, 'output': outputs}
-        else:
-            raise NotImplementedError
-
-    @torch.no_grad()
-    def validation_epoch_end(self, outputs):
-        psnr = torch.stack([x['psnr'] for x in outputs]).mean()
-        ssim = torch.stack([x['ssim'] for x in outputs]).mean()
-        lpips = torch.stack([x['lpips'] for x in outputs]).mean()
-
-        self.log_dict(
-            dictionary={
-                'psnr/val': psnr.item(),
-                'ssim/val': ssim.item(),
-                'lpips/val': lpips.item()
-            }
-        )
-
-    @torch.no_grad()
-    def test_step(self, batch, batch_idx: int):
-        outputs = self.forward(*self.get_inputs(batch))
-        if (gt := self.get_gt(batch)) is not None:
-            if min(self.config.val_range) == -1.:
-                outputs, gt = (outputs + 1) / 2, (gt + 1) / 2
-            psnr = self.psnr(outputs, gt)
-            ssim = self.ssim(outputs, gt)
-            lpips = self.lpips(outputs, gt, True)
-            return {'psnr': psnr, 'ssim': ssim, 'lpips': lpips, 'output': outputs}
-        else:
-            raise NotImplementedError
-
-    @torch.no_grad()
-    def test_epoch_end(self, outputs):
-        psnr = torch.stack([x['psnr'] for x in outputs]).mean()
-        ssim = torch.stack([x['ssim'] for x in outputs]).mean()
-        lpips = torch.stack([x['lpips'] for x in outputs]).mean()
-
-        self.log_dict(
-            dictionary={
-                'psnr/test': psnr.item(),
-                'ssim/test': ssim.item(),
-                'lpips/test': lpips.item()
-            }
-        )
-
-    def log_image(self, tag: str, imgs: torch.Tensor) -> None:
-        img, *_ = self.normalize_tensor(imgs)[:1, ...]
-        self.logger.experiment.add_image(tag, img, self.global_step)
-
-    def normalize_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
-        _min, _max = min(self.config.val_range), max(self.config.val_range)
-        return (tensor - _min) / (_max - _min)
-
+    @final
     @classmethod
-    def generate_config(cls, output_dir: str):
+    def configen(cls, output_dir: str, with_kwargs: bool = False):
 
-        config_dict = {
-            '_taregt_': cls.__module__ + '.' + cls.__name__,
-            'config': {
-                'scale_factor': 4,
-                'preupsample': False,
-                'val_range': [0., 1.],
-                'networks': {},
-                'losses': {},
-                'optimizers': {},
-                'schedulers': {},
-            }
-        }
+        from hiraishin.schema import common, model
 
-        for k, v in cls.__dict__.get('__annotations__').items():
-            if 'net' in k:
-                config_dict['config']['networks'][k] = {
-                    'args': {'_target_': '???', },
-                    'weights': {'weights': None, 'init_type': 'normal', 'init_gain': 0.02}
-                }
-            if 'criterion' in k:
-                config_dict['config']['losses'][k] = {
-                    'args': {'_target_': '???', },
-                    'weight': 1.
-                }
-            if 'optimizer' in k:
-                config_dict['config']['optimizers'][k] = {
-                    'args': {'_target_': '???', 'lr': 1e-3},
-                    'params': []
-                }
-            if 'scheduler' in k:
-                config_dict['config']['schedulers'][k] = {
-                    'args': {'_target_': '???'},
-                    'optimizer': '???'
-                }
+        annotations: Dict[str, Any] = cls.__dict__.get('__annotations__')
+
+        networks: List[model.NetworkConfig] = []
+        for name, _cls in annotations.items():
+            if 'net' not in name:
+                continue
+            networks.append(
+                model.NetworkConfig(
+                    name=name,
+                    args=common.Instantiable(
+                        _target_=get_class_name_with_shortest_module(_cls),
+                        **get_arguments(_cls, with_kwargs)
+                    ),
+                    init=model.NetworkConfig.InitConfig()
+                )
+            )
+
+        losses: List[model.LossConfig] = []
+        for name, _cls in annotations.items():
+            if 'criterion' not in name:
+                continue
+            losses.append(
+                model.LossConfig(
+                    name=name,
+                    args=common.Instantiable(
+                        _target_=get_class_name_with_shortest_module(_cls),
+                        **get_arguments(_cls, with_kwargs)
+                    ),
+                    weight=1.
+                )
+            )
+
+        optimizers: List[model.OptimizerConfig] = []
+        for name in annotations.keys():
+            if 'scheduler' not in name:
+                continue
+            # check wheather the scheduler has the corresponding optimizer
+            if name.replace('scheduler', 'optimizer') not in annotations:
+                raise ValueError('Scheduler must not be defined alone.')
+        for name, _cls in annotations.items():
+            if 'optimizer' not in name:
+                continue
+            # scheduler
+            if name.replace('optimizer', 'scheduler') in annotations:
+                sched_cls = annotations.get(name.replace('optimizer', 'scheduler'))
+                scheduler = model.OptimizerConfig.SchedulerConfig(
+                    args=common.Instantiable(
+                        _target_=get_class_name_with_shortest_module(sched_cls),
+                        **get_arguments(sched_cls, with_kwargs)
+                    )
+                )
+
+            else:
+                scheduler = None
+            # optimizer
+            optimizers.append(
+                model.OptimizerConfig(
+                    name=name,
+                    args=common.Instantiable(
+                        _target_=get_class_name_with_shortest_module(_cls),
+                        **get_arguments(_cls, with_kwargs)
+                    ),
+                    params=['???'],
+                    scheduler=scheduler
+                )
+            )
+
+        if len(optimizers) > 1:
+            print('The order of optimizer configuration must match the order of optimization.')
+            print('Current order:')
+            for i, optimizer in enumerate(optimizers):
+                print(f'\t{i}: {optimizer.name}')
+
+            print('Proceed? [Y/n]: ', end='')
+            while True:
+                if (proceed := input()) in ['', 'Y', 'n']:
+                    break
+                print('Invalid input!')
+                print('Proceed? [Y/n]: ', end='')
+
+            if proceed == 'n':
+                indices = list(range(len(optimizers)))
+                example_str = str(indices).lstrip("[").rstrip("]").replace(" ", "")
+                print(f'Input order (example: {example_str}): ', end='')
+                while True:
+                    try:
+                        order_str = f'[{input()}]'
+                        order = eval(order_str)
+                        if sorted(order) != indices:
+                            raise ValueError
+                        optimizers = [optimizers[o] for o in order]
+                        break
+                    except Exception:
+                        print('Invalid input!')
+                        print(f'Input order (example: {example_str}): ', end='')
+                        pass
+
+        modules: List[model.ModuleConfig] = []
+        for name, _cls in annotations.items():
+            if any(prefix in name for prefix in ['net', 'criterion', 'optimizer', 'scheduler']):
+                continue
+            modules.append(
+                model.ModuleConfig(
+                    name=name,
+                    args=common.Instantiable(
+                        _target_=get_class_name_with_shortest_module(_cls),
+                        **get_arguments(_cls)
+                    ),
+                )
+            )
+
+        m = ModelConfig(
+            _target_=cls._target_(),
+            _recursive_=False,
+            config=ModelConfig.ConfigBody(
+                networks=networks,
+                losses=losses,
+                optimizers=optimizers,
+                modules=modules if len(modules) > 0 else None,
+            )
+        ).dict(by_alias=True)
 
         filename = Path(output_dir).joinpath(f'model/{cls.__name__.rstrip("Model").lower()}.yaml')
         filename.parent.mkdir(parents=True, exist_ok=True)
 
-        OmegaConf.save(OmegaConf.create(config_dict), filename)
+        OmegaConf.save(OmegaConf.create(m), filename)
+        print(f'The config has been generated! --> {filename}')
