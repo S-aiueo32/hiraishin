@@ -1,0 +1,39 @@
+_target_: tests.test_models.ToyModel
+_recursive_: false
+config:
+  networks:
+    - name: net
+      args:
+        _target_: torch.nn.Linear
+        _recursive_: true
+        bias: true
+        out_features: 1
+        in_features: 1
+      init:
+        weight_path: null
+        init_type: null
+        init_gain: null
+  losses:
+    - name: criterion
+      args:
+        _target_: torch.nn.CrossEntropyLoss
+        _recursive_: true
+      weight: 1.0
+  optimizers:
+    - name: optimizer
+      args:
+        _target_: torch.optim.Adam
+        _recursive_: true
+        lr: 0.001
+      params:
+        - net
+      scheduler:
+        args:
+          _target_: torch.optim.lr_scheduler.ExponentialLR
+          _recursive_: true
+          gamma: 1
+        interval: epoch
+        frequency: 1
+        strict: true
+        monitor: null
+  modules: null

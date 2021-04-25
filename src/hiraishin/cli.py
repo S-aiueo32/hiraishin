@@ -18,7 +18,7 @@ def cmd() -> None:
 
 @cmd.command()
 @click.option('--config_path', type=str, default='config')
-@click.option('--config_name', type=str, default='mnist_summation')
+@click.option('--config_name', type=str, default='train')
 @click.option('--overrides', type=str, default='')
 def train(config_path: str, config_name: str, overrides: str) -> None:
 
