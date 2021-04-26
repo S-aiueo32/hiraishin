@@ -50,10 +50,3 @@ jobs:
 
       - name: Run pytest
         run: docker run -v $(pwd)/tests/test-reports:/app/tests/test-reports --rm ${IMAGE_NAME}-cache poetry run pytest
-
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v1
-        if: always()
-        with:
-          files: tests/test-reports/*.xml
-          comment_on_pr: false
