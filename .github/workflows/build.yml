@@ -3,27 +3,57 @@ name: Build
 on:
   push:
 
+env:
+  DOCKER_BUILDKIT: 1
+  IMAGE_NAME: hiraishin
+  DOCKER_FILE_PATH: Dockerfile
+
 jobs:
-  test:
-    name: Run pytest
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v1
+      - name: Cache image
+        uses: actions/cache@v2
         with:
-          python-version: ${{ matrix.python-version }}
+          path: /tmp/docker-save
+          key: docker-save-${{ github.sha }}
 
-      - name: Install Poetry
-        run: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python
+      - name: Build image
+        run: docker build --target dev -f ${DOCKER_FILE_PATH} -t ${IMAGE_NAME} .
 
-      - name: Add path for Poetry
-        run: echo "$HOME/.poetry/bin" >> $GITHUB_PATH
+      - name: Save image
+        run: mkdir -p /tmp/docker-save
+          && docker tag ${IMAGE_NAME} ${IMAGE_NAME}-cache
+          && docker save ${IMAGE_NAME}-cache -o /tmp/docker-save/snapshot.tar
+          && ls -lh /tmp/docker-save || true
 
-      - name: Install Dependencies
-        run: poetry install --no-interaction
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
 
-      - name: Run Tests
-        run: poetry run pytest tests/
+      - name: Cache docker image
+        uses: actions/cache@v2
+        with:
+          path: /tmp/docker-save
+          key: docker-save-${{ github.sha }}
+
+      - name: Load docker image
+        run: docker load -i /tmp/docker-save/snapshot.tar
+
+      - name: Run pytest
+        run: docker run -v $(pwd)/tests/test-reports:/app/tests/test-reports --rm ${IMAGE_NAME}-cache poetry run pytest
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v1
+        if: always()
+        with:
+          files: tests/test-reports/*.xml
+          comment_on_pr: false
