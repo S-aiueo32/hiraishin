@@ -32,4 +32,4 @@ jobs:
           TWINE_USERNAME: ${{ secrets.TESTPYPI_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.TESTPYPI_PASSWORD }}
         run: |
-          poetry publish --build --username $TWINE_USERNAME --password $TWINE_PASSWORD
+          poetry publish -r testpypi --build --username $TWINE_USERNAME --password $TWINE_PASSWORD
