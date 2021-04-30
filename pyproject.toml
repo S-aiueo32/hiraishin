@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hiraishin"
-version = "0.1.0"
+version = "0.0.0"
 description = ""
 authors = ["So Uchida <s.aiueo32@gmail.com>"]
 license = "Apache 2.0"
@@ -24,6 +24,10 @@ matplotlib = "^3.3.3"
 
 [tool.poetry.scripts]
 hiraishin = "hiraishin.cli:cmd"
+
+[tool.poetry-dynamic-versioning]
+enable = true
+style = "pep440"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
