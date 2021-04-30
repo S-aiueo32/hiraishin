@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install poetry poetry-dynamic-versioning twine
 
+      - name: Setup TestPyPI
+        run: |
+          poetry config repositories.testpypi https://test.pypi.org/legacy/
+
       - name: Build and publish
         env:
           TWINE_USERNAME: ${{ secrets.TESTPYPI_USERNAME }}
