@@ -2,7 +2,7 @@
 name = "hiraishin"
 version = "0.0.1"
 description = "A thin PyTorch-Lightning wrapper for building configuration-based DL pipelines with Hydra."
-reamd = "README.md"
+readme = "README.md"
 authors = ["So Uchida <s.aiueo32@gmail.com>"]
 license = "Apache 2.0"
 
