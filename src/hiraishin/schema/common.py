@@ -1,6 +1,5 @@
-from typing import Optional, Union
+from typing import Optional
 
-from omegaconf import OmegaConf, DictConfig
 from pydantic import BaseModel, Extra, Field
 
 

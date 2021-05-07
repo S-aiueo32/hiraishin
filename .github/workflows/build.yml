@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+
+env:
+  DOCKER_BUILDKIT: 1
+  IMAGE_NAME: hiraishin
+  DOCKER_FILE_PATH: Dockerfile
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Cache image
+        uses: actions/cache@v2
+        with:
+          path: /tmp/docker-save
+          key: docker-save-${{ github.sha }}
+
+      - name: Build image
+        run: docker build --target dev -f ${DOCKER_FILE_PATH} -t ${IMAGE_NAME} .
+
+      - name: Save image
+        run: mkdir -p /tmp/docker-save
+          && docker tag ${IMAGE_NAME} ${IMAGE_NAME}-cache
+          && docker save ${IMAGE_NAME}-cache -o /tmp/docker-save/snapshot.tar
+          && ls -lh /tmp/docker-save || true
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Cache docker image
+        uses: actions/cache@v2
+        with:
+          path: /tmp/docker-save
+          key: docker-save-${{ github.sha }}
+
+      - name: Load docker image
+        run: docker load -i /tmp/docker-save/snapshot.tar
+
+      - name: Run pytest
+        run: docker run -v $(pwd)/tests/test-reports:/app/tests/test-reports --rm ${IMAGE_NAME}-cache poetry run pytest

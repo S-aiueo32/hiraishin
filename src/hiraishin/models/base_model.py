@@ -1,11 +1,15 @@
 import inspect
 import itertools
+import re
+from collections import OrderedDict
 from abc import ABCMeta
 from logging import getLogger
 from typing import Any, Dict, List
 from pathlib import Path
 
+import torch
 import torch.nn as nn
+import torch.nn.init as init
 import torch.optim as optim
 from hydra.utils import instantiate
 from omegaconf import OmegaConf, DictConfig
@@ -14,9 +18,57 @@ from pytorch_lightning import LightningModule
 
 from hiraishin.schema import ModelConfig
 from hiraishin.utils import get_arguments, get_class_name_with_shortest_module
-from hiraishin.models.utils import init_weights, load_weights
 
 logger = getLogger(__name__)
+
+try:
+    import hydra
+    CWD = Path(hydra.utils.get_original_cwd()).resolve()
+except (ImportError, ValueError):
+    CWD = Path.cwd()
+
+
+def init_weights(net: nn.Module, init_type: str = 'xavier_uniform', init_gain: float = 1.) -> None:
+
+    def init_func(m: nn.Module):
+        name = m.__class__.__name__
+        if hasattr(m, 'weight') and ('Conv' in name or 'Linear' in name):
+            if init_type == 'normal':
+                init.normal_(m.weight.data, 0.0, init_gain)
+            elif init_type == 'xavier_normal':
+                init.xavier_normal_(m.weight.data, gain=init_gain)
+            elif init_type == 'xavier_uniform':
+                init.xavier_uniform_(m.weight.data, gain=init_gain)
+            elif init_type == 'kaiming':
+                init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif init_type == 'orthogonal':
+                init.orthogonal_(m.weight.data, gain=init_gain)
+            else:
+                raise NotImplementedError(f'initialization method [{init_type}] is not implemented')
+            if hasattr(m, 'bias') and m.bias is not None:
+                init.constant_(m.bias.data, 0.0)
+        elif 'BatchNorm2d' in name:
+            init.normal_(m.weight.data, 1.0, init_gain)
+            init.constant_(m.bias.data, 0.0)
+
+    net.apply(init_func)
+    logger.info(f'Weights have been initialized with (type={init_type}, gain={init_gain}).')
+
+
+def load_weights(net: nn.Module, weight_path: str, net_name: str = None):
+    if (weight_path := CWD.joinpath(weight_path)).exists():
+        if weight_path.suffix == '.pth':
+            state_dict = torch.load(weight_path, map_location=torch.device('cpu'))
+            net.load_state_dict(torch.load(weight_path), strict=False)
+        if weight_path.suffix == '.ckpt':
+            assert net_name is not None, 'net_name is required to load weights from checkpoints.'
+            state_dict = torch.load(weight_path, map_location=torch.device('cpu'))['state_dict']
+            state_dict = OrderedDict((k, v) for k, v in state_dict.items() if k.startswith(net_name))
+            state_dict = OrderedDict((k.replace(net_name + '.', ''), v) for k, v in state_dict.items())
+            net.load_state_dict(state_dict)
+        logger.info(f'Weights have been loaded from {str(weight_path)}.')
+    else:
+        logger.warn(f'{str(weight_path)} does not exists.')
 
 
 class BaseModel(LightningModule, metaclass=ABCMeta):
@@ -269,7 +321,10 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             )
         ).dict(by_alias=True)
 
-        filename = Path(output_dir).joinpath(f'model/{cls.__name__.rstrip("Model").lower()}.yaml')
+        camel2snake = r'(?<!^)(?=[A-Z])'
+        cls_name_snake = re.sub(camel2snake, '_', cls.__name__.strip("Model")).lower()
+
+        filename = Path(output_dir).joinpath(f'model/{cls_name_snake}.yaml')
         filename.parent.mkdir(parents=True, exist_ok=True)
 
         OmegaConf.save(OmegaConf.create(m), filename)
