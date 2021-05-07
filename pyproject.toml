@@ -1,7 +1,8 @@
 [tool.poetry]
 name = "hiraishin"
 version = "0.0.1"
-description = ""
+description = "A thin PyTorch-Lightning wrapper for building configuration-based DL pipelines with Hydra."
+reamd = "README.md"
 authors = ["So Uchida <s.aiueo32@gmail.com>"]
 license = "Apache 2.0"
 
