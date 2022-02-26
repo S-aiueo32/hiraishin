@@ -1,43 +1,53 @@
+from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from pydantic import BaseModel, FilePath
+from pydantic import BaseModel, Extra, FilePath, Field, validator
 
-from .common import Instantiable, ModuleConfig
+from hiraishin.schema.common import Instantiable, ModuleConfig
+
+
+class WeightsConfig(BaseModel):
+    initializer: Optional[Instantiable] = None
+    path: Optional[Union[FilePath, Dict[str, FilePath]]] = None
+
+    @validator("path")
+    def check_extensions(cls, v: Union[Path, Dict[str, Path]]):
+        if isinstance(v, Path):
+            if v.stem not in [".ckpt", ".pth"]:
+                raise ValueError(".ckpt or .pth are allowed.")
+        if isinstance(v, Path):
+            if any(path.suffix != ".pth" for path in v.values()):
+                raise ValueError("Only .pth is allowed for partial weights.")
+        return v
 
 
 class NetworkConfig(ModuleConfig):
-
-    class InitConfig(BaseModel):
-        weight_path: Optional[Union[FilePath, Dict[str, FilePath]]] = None
-        init_type: Optional[str] = None
-        init_gain: Optional[float] = None
-
-    init: InitConfig
+    weights: WeightsConfig
 
 
 class LossConfig(ModuleConfig):
-    weight: Optional[float] = 1.
+    weight: float = 1.0
+
+
+class SchedulerConfig(BaseModel):
+    args: Instantiable
+    interval: str = "epoch"
+    frequency: int = 1
+    strict: bool = True
+    monitor: Optional[str] = None
 
 
 class OptimizerConfig(ModuleConfig):
-
-    class SchedulerConfig(BaseModel):
-        args: Instantiable
-        interval: str = 'epoch'
-        frequency: int = 1
-        strict: bool = True
-        monitor: Optional[str] = None
-
     params: List[str] = []
     scheduler: Optional[SchedulerConfig] = None
 
 
+class ModelConfigBody(BaseModel, extra=Extra.allow):
+    networks: Dict[str, NetworkConfig]
+    losses: Dict[str, LossConfig]
+    optimizers: Dict[str, OptimizerConfig]
+
+
 class ModelConfig(Instantiable):
-
-    class ConfigBody(BaseModel):
-        networks: List[NetworkConfig]
-        losses: List[LossConfig]
-        optimizers: List[OptimizerConfig]
-        modules: Optional[List[ModuleConfig]] = None
-
-    config: ConfigBody
+    recursive: Optional[bool] = Field(False, alias="_recursive_")
+    config: ModelConfigBody
