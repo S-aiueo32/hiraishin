@@ -1,4 +1,6 @@
 import importlib
+import sys
+from pathlib import Path
 from typing import Type
 
 import click
@@ -27,6 +29,9 @@ def cmd() -> None:
     default=False,
 )
 def generate(model_class: str, output_dir: str, with_kwargs: bool):
+
+    sys.path.append(str(Path.cwd()))
+
     *modules, cls = model_class.split(".")
     Model: Type[BaseModel] = getattr(importlib.import_module(".".join(modules)), cls)
     Model.generate(output_dir, with_kwargs)
