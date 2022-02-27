@@ -3,7 +3,7 @@ import inspect
 from collections import OrderedDict
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, TypeVar
 
 import hydra
 import torch
@@ -52,7 +52,13 @@ def get_arguments(cls: Type[Any], with_kwargs: bool = False) -> Dict[str, Any]:
     return params
 
 
-def load_weights(net: nn.Module, path: str, net_name: Optional[str] = None) -> None:
+Module = TypeVar(
+    "Module",
+    bound=nn.Module,
+)
+
+
+def load_weights(net: Module, path: str, net_name: Optional[str] = None) -> None:
     """Loads weights from the given path whose extension is `.ckpt` or `.pth`. For `.ckpt`, net_name is required."""
     if path.suffix == ".pth":
         net.load_state_dict(torch.load(CWD.joinpath(path)), strict=False)
@@ -77,7 +83,7 @@ class BasicWeightInitializer:
         self.init_type = init_type
         self.kwargs: Dict[str, Any] = kwargs
 
-    def init_fn(self, m: nn.Module) -> None:
+    def init_fn(self, m: Module) -> None:
         name = m.__class__.__name__
         if hasattr(m, "weight") and ("Conv" in name or "Linear" in name):
             fn = getattr(init, f"{self.init_type}_")
@@ -88,7 +94,7 @@ class BasicWeightInitializer:
             init.normal_(m.weight.data, 0.0, 1.0)
             init.constant_(m.bias.data, 0.0)
 
-    def __call__(self, net: nn.Module) -> None:
+    def __call__(self, net: Module) -> None:
         net.apply(self.init_fn)
         logger.info(
             f"{net.__class__.__name__} was initialized with {self.__class__.__name__}."
