@@ -2,7 +2,7 @@ import itertools
 from abc import ABCMeta
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Tuple, Union, Callable, TypeVar
 
 import torch.nn as nn
 import torch.optim as optim
@@ -20,6 +20,20 @@ from hiraishin.models.utils import (
 )
 
 logger = getLogger(__name__)
+
+
+Module = TypeVar(
+    "Module",
+    bound=nn.Module,
+)
+Optimizer = TypeVar(
+    "Optimizer",
+    bound=optim.Optimizer,
+)
+LRScheduler = TypeVar(
+    "LRScheduler",
+    bound=optim.lr_scheduler._LRScheduler,
+)
 
 
 class BaseModel(LightningModule, metaclass=ABCMeta):
@@ -64,11 +78,11 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def define_networks(self) -> None:
         for name, config in self.config.networks.items():
             # network definition
-            net: nn.Module = instantiate(config.args.dict(by_alias=True))
+            net: Module = instantiate(config.args.dict(by_alias=True))
 
             # initialize weights
             if config.weights.initializer is not None:
-                initializer: Callable[[nn.Module], None] = instantiate(
+                initializer: Callable[[Module], None] = instantiate(
                     config.weights.initializer.dict(by_alias=True)
                 )
             else:
@@ -94,22 +108,22 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     @final
     def define_losses(self) -> None:
         for name, config in self.config.losses.items():
-            criterion = instantiate(config.args.dict(by_alias=True))
+            criterion: Module = instantiate(config.args.dict(by_alias=True))
             setattr(self, name, criterion)
             setattr(self, name.replace("criterion", "weight"), config.weight)
 
     @final
     def define_optimizers(self) -> None:
         for name, config in self.config.optimizers.items():
-            targets: List[nn.Module] = [getattr(self, net) for net in config.params]
-            optimizer: optim.Optimizer = instantiate(
+            targets: List[Module] = [getattr(self, net) for net in config.params]
+            optimizer: Optimizer = instantiate(
                 config.args.dict(by_alias=True),
                 itertools.chain(*[net.parameters() for net in targets]),
             )
             setattr(self, name, optimizer)
 
             if config.scheduler is not None:
-                scheduler: optim.lr_scheduler._LRScheduler = instantiate(
+                scheduler: LRScheduler = instantiate(
                     config.scheduler.args.dict(by_alias=True),
                     optimizer=optimizer,
                 )
@@ -120,13 +134,15 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     @final
     def configure_optimizers(
         self,
-    ) -> Tuple[List[optim.Optimizer], List[Dict[str, Any]]]:
+    ) -> Tuple[List[Optimizer], List[Dict[str, Any]]]:
         optim_list, sched_list = [], []
         for name, config in self.config.optimizers.items():
-            optimizer = getattr(self, name)
+            optimizer: Optimizer = getattr(self, name)
             optim_list.append(optimizer)
 
-            scheduler = getattr(self, name.replace("optimizer", "scheduler"))
+            scheduler: LRScheduler = getattr(
+                self, name.replace("optimizer", "scheduler")
+            )
             sched_dict = {
                 "scheduler": scheduler,
                 "interval": config.scheduler.interval,
