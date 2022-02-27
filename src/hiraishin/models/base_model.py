@@ -102,10 +102,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             if isinstance(config.weights.path, Path):  # for whole network
                 load_weights(net, config.weights.path, name)
             if isinstance(config.weights.path, dict):
-                for (
-                    mod_name,
-                    path,
-                ) in config.weights.path.items():  # for modules
+                for (mod_name, path) in config.weights.path.items():  # for modules
                     load_weights(getattr(net, mod_name), path)
 
             setattr(self, name, net)
