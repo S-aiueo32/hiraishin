@@ -302,7 +302,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                         print("Invalid input!")
                         pass
 
-        modules: Dict[str, schema.ModuleConfig] = {}
+        others: Dict[str, schema.ModuleConfig] = {}
         for name, _cls in annotations.items():
             if any(
                 name.startswith(prefix)
@@ -311,14 +311,14 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                 continue
             elif _cls in (int, str, float, dict):
                 if hasattr(cls, name):
-                    modules.update({name: getattr(cls, name)})
+                    others.update({name: getattr(cls, name)})
                 else:
                     if _cls == dict:
-                        modules.update({name: {"???": "???"}})
+                        others.update({name: {"???": "???"}})
                     else:
-                        modules.update({name: "???"})
+                        others.update({name: "???"})
             else:
-                modules.update(
+                others.update(
                     {
                         name: schema.Instantiable(
                             _target_=get_class_name_with_shortest_module(_cls),
@@ -334,7 +334,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                 networks=networks,
                 losses=losses,
                 optimizers=optimizers,
-                **modules,
+                **others,
             ),
         ).dict(by_alias=True)
 
