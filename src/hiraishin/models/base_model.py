@@ -276,13 +276,12 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             for i, optimizer_name in enumerate(optimizers.keys()):
                 print(f"\t{i}: {optimizer_name}")
 
-            print("Proceed? [Y/n]: ", end="")
             while True:
+                print("Proceed? [Y/n]: ", end="")
                 proceed = input()
                 if proceed in ["", "Y", "n"]:
                     break
                 print("Invalid input!")
-                print("Proceed? [Y/n]: ", end="")
 
             if proceed == "n":
                 indices = list(range(len(optimizers)))
