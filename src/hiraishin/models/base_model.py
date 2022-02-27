@@ -302,21 +302,28 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                         print("Invalid input!")
                         pass
 
-        others: Dict[str, schema.ModuleConfig] = {}
+        others: Dict[str, Union[schema.Instantiable, int, str, float, dict]] = {}
         for name, _cls in annotations.items():
             if any(
                 name.startswith(prefix)
                 for prefix in ["net", "criterion", "optimizer", "scheduler"]
             ):
                 continue
-            elif _cls in (int, str, float, dict):
-                if hasattr(cls, name):
-                    others.update({name: getattr(cls, name)})
-                else:
-                    if _cls == dict:
-                        others.update({name: {"???": "???"}})
+            elif _cls.__module__ == "builtins":
+                if _cls in (int, str, float):
+                    if hasattr(cls, name):
+                        others.update({name: getattr(cls, name)})
                     else:
                         others.update({name: "???"})
+                elif _cls == dict:
+                    if hasattr(cls, name):
+                        others.update({name: getattr(cls, name)})
+                    else:
+                        others.update({name: {"???": "???"}})
+                else:
+                    raise TypeError(
+                        "Supported built-in type is int, str, float or dict."
+                    )
             else:
                 others.update(
                     {
