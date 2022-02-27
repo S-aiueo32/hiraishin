@@ -237,10 +237,13 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                 continue
             # check wheather the scheduler has the corresponding optimizer
             if name.replace("scheduler", "optimizer") not in annotations:
-                raise ValueError("Scheduler must not be defined alone.")
+                raise ValueError(
+                    "The scheduler can be defined with the correcponding optimizer."
+                )
         for name, _cls in annotations.items():
             if not name.startswith("optimizer_"):
                 continue
+
             # scheduler
             if name.replace("optimizer", "scheduler") in annotations:
                 sched_cls = annotations.get(name.replace("optimizer", "scheduler"))
@@ -253,6 +256,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
 
             else:
                 scheduler = None
+
             # optimizer
             optimizers.update(
                 {
@@ -269,7 +273,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
 
         if len(optimizers) > 1:
             print(
-                "The order of optimizer configuration must match the order of optimization."
+                "The order of optimizer configurations must match the order of optimization. (e.g., in GANs training.)"
             )
             print("Current order:")
             for i, optimizer_name in enumerate(optimizers.keys()):
