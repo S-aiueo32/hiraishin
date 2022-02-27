@@ -77,6 +77,11 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     @final
     def define_networks(self) -> None:
         for name, config in self.config.networks.items():
+            if not name.startswith("net_"):
+                raise NameError(
+                    'Configurations for networks must have the prefix "net_".'
+                )
+
             # network definition
             net: Module = instantiate(config.args.dict(by_alias=True))
 
@@ -108,6 +113,10 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     @final
     def define_losses(self) -> None:
         for name, config in self.config.losses.items():
+            if not name.startswith("criterion_"):
+                raise NameError(
+                    'Configurations for loss functions must have the prefix "criterion_".'
+                )
             criterion: Module = instantiate(config.args.dict(by_alias=True))
             setattr(self, name, criterion)
             setattr(self, name.replace("criterion", "weight"), config.weight)
@@ -115,6 +124,10 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     @final
     def define_optimizers(self) -> None:
         for name, config in self.config.optimizers.items():
+            if not name.startswith("optimizer_"):
+                raise NameError(
+                    'Configurations for optimizers must have the prefix "optimizer_".'
+                )
             targets: List[Module] = [getattr(self, net) for net in config.params]
             optimizer: Optimizer = instantiate(
                 config.args.dict(by_alias=True),
@@ -188,7 +201,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
 
         networks: Dict[str, schema.NetworkConfig] = {}
         for name, _cls in annotations.items():
-            if "net" not in name:
+            if not name.startswith("net_"):
                 continue
             networks.update(
                 {
@@ -204,7 +217,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
 
         losses: Dict[str, schema.LossConfig] = {}
         for name, _cls in annotations.items():
-            if "criterion" not in name:
+            if not name.startswith("criterion_"):
                 continue
             losses.update(
                 {
@@ -220,13 +233,13 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
 
         optimizers: List[schema.OptimizerConfig] = {}
         for name in annotations.keys():
-            if "scheduler" not in name:
+            if not name.startswith("scheduler_"):
                 continue
             # check wheather the scheduler has the corresponding optimizer
             if name.replace("scheduler", "optimizer") not in annotations:
                 raise ValueError("Scheduler must not be defined alone.")
         for name, _cls in annotations.items():
-            if "optimizer" not in name:
+            if not name.startswith("optimizer_"):
                 continue
             # scheduler
             if name.replace("optimizer", "scheduler") in annotations:
@@ -292,8 +305,8 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
         modules: Dict[str, schema.ModuleConfig] = {}
         for name, _cls in annotations.items():
             if any(
-                prefix in name
-                for prefix in ["net", "criterion", "optimizer", "scheduler"]
+                name.startswith(prefix)
+                for prefix in ["net_", "criterion_", "optimizer_", "scheduler_"]
             ):
                 continue
             elif _cls in (int, str, float, dict):
