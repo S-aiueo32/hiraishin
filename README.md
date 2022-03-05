@@ -114,7 +114,7 @@ config:
 
 ```
 
-First of all, it is compliant with the instantiation by `hydra.utils.instantiation`.
+First of all, it is compliant with the instantiation by `hydra.utils.instantiate`.
 
 The positional arguments are filled with `???` that indicates mandatory parameters. They should be overridden by the values you want to set.
 
