@@ -310,11 +310,16 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             ):
                 continue
             elif _cls.__module__ == "builtins":
-                if _cls in (int, str, float):
+                if _cls in (int, str, float, bool):
                     if hasattr(cls, name):
                         others.update({name: getattr(cls, name)})
                     else:
                         others.update({name: "???"})
+                elif _cls == list:
+                    if hasattr(cls, name):
+                        others.update({name: getattr(cls, name)})
+                    else:
+                        others.update({name: ["???"]})
                 elif _cls == dict:
                     if hasattr(cls, name):
                         others.update({name: getattr(cls, name)})
@@ -345,7 +350,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             ),
         ).dict(by_alias=True)
 
-        filename = Path(output_dir).joinpath(f"model/{cls.__name__}.yaml")
+        filename = Path(output_dir).joinpath(f"{cls.__name__}.yaml")
         filename.parent.mkdir(parents=True, exist_ok=True)
 
         OmegaConf.save(OmegaConf.create(m), filename)
