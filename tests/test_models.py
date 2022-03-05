@@ -123,7 +123,7 @@ class TestModel:
     def test_instantiate_with_missing_values(self, tmpdir):
         """Check if raising error with missing values."""
         ToyModel.generate(tmpdir)
-        config = OmegaConf.load(Path(tmpdir).joinpath("model/ToyModel.yaml"))
+        config = OmegaConf.load(Path(tmpdir).joinpath("ToyModel.yaml"))
         validate(config, ModelConfig)
         with pytest.raises(MissingMandatoryValue):
             _ = instantiate(config)
@@ -151,15 +151,13 @@ class TestModel:
     def test_generate(self, tmpdir):
         """Check if generating valid configs for pydantic."""
         ToyModel.generate(tmpdir)
-        config = OmegaConf.load(Path(tmpdir).joinpath("model/ToyModel.yaml"))
+        config = OmegaConf.load(Path(tmpdir).joinpath("ToyModel.yaml"))
         validate(config, ModelConfig)
 
     def test_generate_with_not_reserved_params(self, tmpdir):
         """Check if generating valid configs with not-reserved parameters."""
         NotReservedParamsModel.generate(tmpdir, with_kwargs=True)
-        config = OmegaConf.load(
-            Path(tmpdir).joinpath("model/NotReservedParamsModel.yaml")
-        )
+        config = OmegaConf.load(Path(tmpdir).joinpath("NotReservedParamsModel.yaml"))
         validate(config, ModelConfig)
 
         with pytest.raises(MissingMandatoryValue):
@@ -197,7 +195,7 @@ class TestModel:
         MultipleOptimizersModel.generate(tmpdir)
 
         model_config: ModelConfig = OmegaConf.load(
-            Path(tmpdir).joinpath(f"model/{MultipleOptimizersModel.__name__}.yaml")
+            Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml")
         )
         assert list(model_config.config.optimizers.keys()) == [
             "optimizer_1",
@@ -210,7 +208,7 @@ class TestModel:
         MultipleOptimizersModel.generate(tmpdir)
 
         model_config: ModelConfig = OmegaConf.load(
-            Path(tmpdir).joinpath(f"model/{MultipleOptimizersModel.__name__}.yaml")
+            Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml")
         )
         assert list(model_config.config.optimizers.keys()) == [
             "optimizer_2",
