@@ -21,7 +21,7 @@ def cmd() -> None:
 @click.option(
     "--output_dir",
     type=click.Path(exists=True, file_okay=False),
-    default="./config",
+    default="./config/model",
 )
 @click.option(
     "--with_kwargs",
