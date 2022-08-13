@@ -1,4 +1,3 @@
-import re
 from io import StringIO
 from pathlib import Path
 
@@ -6,15 +5,16 @@ import pytest
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import MissingMandatoryValue
+from torch.utils.data import DataLoader, Dataset
 
 from hiraishin.models import BaseModel
 from hiraishin.schema import ModelConfig, validate
 from hiraishin.utils import load_from_checkpoint
 
 
-class ToyDataset(torch.utils.data.Dataset):
+class ToyDataset(Dataset):
     def __init__(self) -> None:
         super().__init__()
 
@@ -29,8 +29,8 @@ class ToyDataModule(pl.LightningDataModule):
     def __init__(self):
         super().__init__()
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
-        dataloader = torch.utils.data.DataLoader(ToyDataset())
+    def train_dataloader(self) -> DataLoader:
+        dataloader = DataLoader(ToyDataset())
         return dataloader
 
 
@@ -42,7 +42,7 @@ class ToyModel(BaseModel):
     optimizer: torch.optim.Adam
     scheduler: torch.optim.lr_scheduler.ExponentialLR
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: DictConfig):
         super().__init__(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -83,8 +83,8 @@ class NotReservedParamsModel(BaseModel):
 
     dummy: DummyClass
 
-    def __init__(self, config: ModelConfig):
-        self.initialize(config)
+    def __init__(self, config: DictConfig):
+        super().__init__(config)
 
 
 class MultipleOptimizersModel(BaseModel):
@@ -95,8 +95,8 @@ class MultipleOptimizersModel(BaseModel):
     optimizer_1: torch.optim.Adam
     optimizer_2: torch.optim.Adam
 
-    def __init__(self, config: ModelConfig):
-        self.initialize(config)
+    def __init__(self, config: DictConfig):
+        super().__init__(config)
 
 
 class AloneShcdulerModel(BaseModel):
@@ -107,8 +107,8 @@ class AloneShcdulerModel(BaseModel):
     optimizer: torch.optim.Adam
     scheduler_: torch.optim.lr_scheduler.ExponentialLR
 
-    def __init__(self, config: ModelConfig):
-        self.initialize(config)
+    def __init__(self, config: DictConfig):
+        super().__init__(config)
 
 
 @pytest.mark.usefixtures("tmpdir")
@@ -124,6 +124,7 @@ class TestModel:
         """Check if raising error with missing values."""
         ToyModel.generate(tmpdir)
         config = OmegaConf.load(Path(tmpdir).joinpath("ToyModel.yaml"))
+        assert isinstance(config, DictConfig)
         validate(config, ModelConfig)
         with pytest.raises(MissingMandatoryValue):
             _ = instantiate(config)
@@ -152,12 +153,14 @@ class TestModel:
         """Check if generating valid configs for pydantic."""
         ToyModel.generate(tmpdir)
         config = OmegaConf.load(Path(tmpdir).joinpath("ToyModel.yaml"))
+        assert isinstance(config, DictConfig)
         validate(config, ModelConfig)
 
     def test_generate_with_not_reserved_params(self, tmpdir):
         """Check if generating valid configs with not-reserved parameters."""
         NotReservedParamsModel.generate(tmpdir, with_kwargs=True)
         config = OmegaConf.load(Path(tmpdir).joinpath("NotReservedParamsModel.yaml"))
+        assert isinstance(config, DictConfig)
         validate(config, ModelConfig)
 
         with pytest.raises(MissingMandatoryValue):
@@ -194,9 +197,7 @@ class TestModel:
         monkeypatch.setattr("sys.stdin", StringIO("Y"))
         MultipleOptimizersModel.generate(tmpdir)
 
-        model_config: ModelConfig = OmegaConf.load(
-            Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml")
-        )
+        model_config = OmegaConf.load(Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml"))
         assert list(model_config.config.optimizers.keys()) == [
             "optimizer_1",
             "optimizer_2",
@@ -207,9 +208,7 @@ class TestModel:
         monkeypatch.setattr("sys.stdin", StringIO("\n".join(["n", "1,0"])))
         MultipleOptimizersModel.generate(tmpdir)
 
-        model_config: ModelConfig = OmegaConf.load(
-            Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml")
-        )
+        model_config = OmegaConf.load(Path(tmpdir).joinpath(f"{MultipleOptimizersModel.__name__}.yaml"))
         assert list(model_config.config.optimizers.keys()) == [
             "optimizer_2",
             "optimizer_1",
