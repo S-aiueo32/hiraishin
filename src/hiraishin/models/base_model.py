@@ -2,7 +2,7 @@ import itertools
 from abc import ABCMeta
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple, Type, Union, final
+from typing import Any, Callable, Dict, List, Tuple, Union, final
 
 import torch.optim as optim
 from hydra.utils import instantiate
@@ -282,7 +282,6 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                         break
                     except Exception:
                         print("Invalid input!")
-                        pass
 
         others: Dict[str, Union[Instantiable, int, str, float, dict, list[str]]] = {}
         for name, _cls in annotations.items():

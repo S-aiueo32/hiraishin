@@ -147,7 +147,7 @@ class TestModel:
         trainer.save_checkpoint(ckpt_path)
 
         # load models
-        _model = load_from_checkpoint(ckpt_path)
+        load_from_checkpoint(ckpt_path)
 
     def test_generate(self, tmpdir):
         """Check if generating valid configs for pydantic."""
