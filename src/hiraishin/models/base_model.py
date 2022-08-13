@@ -2,41 +2,40 @@ import itertools
 from abc import ABCMeta
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union, Callable, TypeVar
+from typing import Any, Callable, Dict, List, Tuple, Union, final
 
-import torch.nn as nn
 import torch.optim as optim
 from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
-from overrides import final
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import LightningModule
 
-from hiraishin import schema
 from hiraishin.models.utils import (
     BasicWeightInitializer,
-    load_weights,
     get_arguments,
     get_class_name_with_shortest_module,
+    load_weights,
+)
+from hiraishin.schema import (
+    Instantiable,
+    LossConfig,
+    LRScheduler,
+    ModelConfig,
+    ModelConfigBody,
+    Module,
+    NetworkConfig,
+    Optimizer,
+    OptimizerConfig,
+    SchedulerConfig,
+    WeightsConfig,
 )
 
 logger = getLogger(__name__)
 
 
-Module = TypeVar(
-    "Module",
-    bound=nn.Module,
-)
-Optimizer = TypeVar(
-    "Optimizer",
-    bound=optim.Optimizer,
-)
-LRScheduler = TypeVar(
-    "LRScheduler",
-    bound=optim.lr_scheduler._LRScheduler,
-)
-
-
 class BaseModel(LightningModule, metaclass=ABCMeta):
+
+    hparams: Dict[str, Any]
+
     @final
     @classmethod
     def _target_(cls) -> str:
@@ -46,7 +45,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def __init__(self, config: DictConfig) -> None:
         super().__init__()
 
-        self.config = schema.ModelConfigBody(**OmegaConf.to_container(config))
+        self.config = ModelConfigBody.parse_obj(OmegaConf.to_container(config))
 
         self.save_hyperparameters()
         self.hparams["_target_"] = self._target_()
@@ -59,7 +58,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def register_components(self) -> None:
         # Firstly, set non-reserved parameteres
         for name, config in self.config.dict(by_alias=True).items():
-            if name in schema.ModelConfigBody.__fields__.keys():
+            if name in ModelConfigBody.__fields__.keys():
                 # skips networks, losses and optimizers
                 continue
             if isinstance(config, dict) and "_target_" in config:
@@ -78,18 +77,14 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def define_networks(self) -> None:
         for name, config in self.config.networks.items():
             if not name.startswith("net"):
-                raise NameError(
-                    'Configurations for networks must have the prefix "net".'
-                )
+                raise NameError('Configurations for networks must have the prefix "net".')
 
             # network definition
             net: Module = instantiate(config.args.dict(by_alias=True))
 
             # initialize weights
             if config.weights.initializer is not None:
-                initializer: Callable[[Module], None] = instantiate(
-                    config.weights.initializer.dict(by_alias=True)
-                )
+                initializer: Callable[[Module], None] = instantiate(config.weights.initializer.dict(by_alias=True))
             else:
                 # initialize with xavier_uniform_(gain=1.0) by default
                 initializer = BasicWeightInitializer(
@@ -111,9 +106,7 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def define_losses(self) -> None:
         for name, config in self.config.losses.items():
             if not name.startswith("criterion"):
-                raise NameError(
-                    'Configurations for loss functions must have the prefix "criterion".'
-                )
+                raise NameError('Configurations for loss functions must have the prefix "criterion".')
             criterion: Module = instantiate(config.args.dict(by_alias=True))
             setattr(self, name, criterion)
             setattr(self, name.replace("criterion", "weight"), config.weight)
@@ -122,18 +115,15 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def define_optimizers(self) -> None:
         for name, config in self.config.optimizers.items():
             if not name.startswith("optimizer"):
-                raise NameError(
-                    'Configurations for optimizers must have the prefix "optimizer".'
-                )
+                raise NameError('Configurations for optimizers must have the prefix "optimizer".')
             targets: List[Module] = [getattr(self, net) for net in config.params]
             optimizer: Optimizer = instantiate(
-                config.args.dict(by_alias=True),
-                itertools.chain(*[net.parameters() for net in targets]),
+                config.args.dict(by_alias=True), itertools.chain(*[net.parameters() for net in targets])
             )
             setattr(self, name, optimizer)
 
             if config.scheduler is not None:
-                scheduler: LRScheduler = instantiate(
+                scheduler = instantiate(
                     config.scheduler.args.dict(by_alias=True),
                     optimizer=optimizer,
                 )
@@ -142,49 +132,47 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
             setattr(self, name.replace("optimizer", "scheduler"), scheduler)
 
     @final
-    def configure_optimizers(
-        self,
-    ) -> Tuple[List[Optimizer], List[Dict[str, Any]]]:
-        optim_list, sched_list = [], []
+    def configure_optimizers(self) -> Tuple[List[Optimizer], List[Dict[str, Any]]]:
+        optimizer_list, scheduler_list = [], []
         for name, config in self.config.optimizers.items():
             optimizer: Optimizer = getattr(self, name)
-            optim_list.append(optimizer)
+            optimizer_list.append(optimizer)
 
-            scheduler: LRScheduler = getattr(
-                self, name.replace("optimizer", "scheduler")
-            )
-            sched_dict = {
+            scheduler: LRScheduler = getattr(self, name.replace("optimizer", "scheduler"))
+            scheduler_dict = {
                 "scheduler": scheduler,
-                "interval": config.scheduler.interval,
-                "frequency": config.scheduler.frequency,
+                "interval": getattr(config.scheduler, "interval", "epoch"),
+                "frequency": getattr(config.scheduler, "frequency", 1),
                 "name": f"lr/{name}",
             }
             if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                sched_dict.update(
+                scheduler_dict.update(
                     {
                         "reduce_on_plateau": True,
-                        "monitor": config.scheduler.monitor or "loss/val",
-                        "strict": config.scheduler.strict,
+                        "monitor": getattr(config.scheduler, "monitor", "loss/val"),
+                        "strict": getattr(config.scheduler, "strict", "True"),
                     }
                 )
-            sched_list.append(sched_dict)
-        return optim_list, sched_list
+            scheduler_list.append(scheduler_dict)
+        return optimizer_list, scheduler_list
 
     @final
     def validate(self) -> None:
         """Checks wheather annotated variables is defined correctly. Additional variables will be allowed."""
-        is_valid: List[bool] = []
-        for k, v in self.__class__.__dict__.get("__annotations__").items():
+        is_valid = True
+        for k, v in self.__class__.__dict__.get("__annotations__", {}).items():
+            if k == "hparams":
+                continue
             if not hasattr(self, k):
                 logger.warning(f"class variable {k} is not initialized.")
-                is_valid.append(False)
+                is_valid = False
                 continue
             if not isinstance(getattr(self, k), v):
                 logger.warning(f"type of class variable {k} is not matched with {v}")
-                is_valid.append(False)
+                is_valid = False
                 continue
-            is_valid.append(True)
-        if all(is_valid):
+
+        if is_valid:
             logger.info("model initialization successed!")
         else:
             raise ValueError("model initialization failed because of above errors.")
@@ -194,32 +182,32 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
     def generate(cls, output_dir: Union[str, Path], with_kwargs: bool = False) -> None:
         """Gererates a configuration file from type annotations."""
 
-        annotations: Dict[str, Any] = cls.__dict__.get("__annotations__")
+        annotations: Dict[str, Any] = cls.__dict__.get("__annotations__", {})
 
-        networks: Dict[str, schema.NetworkConfig] = {}
+        networks: Dict[str, NetworkConfig] = {}
         for name, _cls in annotations.items():
             if not name.startswith("net"):
                 continue
             networks.update(
                 {
-                    name: schema.NetworkConfig(
-                        args=schema.Instantiable(
+                    name: NetworkConfig(
+                        args=Instantiable(
                             _target_=get_class_name_with_shortest_module(_cls),
                             **get_arguments(_cls, with_kwargs),
                         ),
-                        weights=schema.WeightsConfig(),
+                        weights=WeightsConfig(),
                     )
                 }
             )
 
-        losses: Dict[str, schema.LossConfig] = {}
+        losses: Dict[str, LossConfig] = {}
         for name, _cls in annotations.items():
             if not name.startswith("criterion"):
                 continue
             losses.update(
                 {
-                    name: schema.LossConfig(
-                        args=schema.Instantiable(
+                    name: LossConfig(
+                        args=Instantiable(
                             _target_=get_class_name_with_shortest_module(_cls),
                             **get_arguments(_cls, with_kwargs),
                         ),
@@ -228,37 +216,34 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                 }
             )
 
-        optimizers: List[schema.OptimizerConfig] = {}
+        optimizers: Dict[str, OptimizerConfig] = {}
         for name in annotations.keys():
             if not name.startswith("scheduler"):
                 continue
             # check wheather the scheduler has the corresponding optimizer
             if name.replace("scheduler", "optimizer") not in annotations:
-                raise ValueError(
-                    "The scheduler can be defined with the correcponding optimizer."
-                )
+                raise ValueError("The scheduler can be defined with the correcponding optimizer.")
         for name, _cls in annotations.items():
             if not name.startswith("optimizer"):
                 continue
 
             # scheduler
-            if name.replace("optimizer", "scheduler") in annotations:
-                sched_cls = annotations.get(name.replace("optimizer", "scheduler"))
-                scheduler = schema.SchedulerConfig(
-                    args=schema.Instantiable(
-                        _target_=get_class_name_with_shortest_module(sched_cls),
-                        **get_arguments(sched_cls, with_kwargs),
+            scheduler_cls = annotations.get(name.replace("optimizer", "scheduler"), None)
+            if scheduler_cls is not None:
+                scheduler = SchedulerConfig(
+                    args=Instantiable(
+                        _target_=get_class_name_with_shortest_module(scheduler_cls),
+                        **get_arguments(scheduler_cls, with_kwargs),
                     )
                 )
-
             else:
                 scheduler = None
 
             # optimizer
             optimizers.update(
                 {
-                    name: schema.OptimizerConfig(
-                        args=schema.Instantiable(
+                    name: OptimizerConfig(
+                        args=Instantiable(
                             _target_=get_class_name_with_shortest_module(_cls),
                             **get_arguments(_cls, with_kwargs),
                         ),
@@ -293,21 +278,14 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                         order = eval(order_str)
                         if set(order) != set(indices):
                             raise ValueError
-                        optimizers = {
-                            list(optimizers.keys())[o]: list(optimizers.values())[o]
-                            for o in order
-                        }
+                        optimizers = {list(optimizers.keys())[o]: list(optimizers.values())[o] for o in order}
                         break
                     except Exception:
                         print("Invalid input!")
-                        pass
 
-        others: Dict[str, Union[schema.Instantiable, int, str, float, dict]] = {}
+        others: Dict[str, Union[Instantiable, int, str, float, dict, list[str]]] = {}
         for name, _cls in annotations.items():
-            if any(
-                name.startswith(prefix)
-                for prefix in ["net", "criterion", "optimizer", "scheduler"]
-            ):
+            if any(name.startswith(prefix) for prefix in ["net", "criterion", "optimizer", "scheduler"]):
                 continue
             elif _cls.__module__ == "builtins":
                 if _cls in (int, str, float, bool):
@@ -326,23 +304,21 @@ class BaseModel(LightningModule, metaclass=ABCMeta):
                     else:
                         others.update({name: {"???": "???"}})
                 else:
-                    raise TypeError(
-                        "Supported built-in type is int, str, float or dict."
-                    )
+                    raise TypeError("Supported built-in type is int, str, float or dict.")
             else:
                 others.update(
                     {
-                        name: schema.Instantiable(
+                        name: Instantiable(
                             _target_=get_class_name_with_shortest_module(_cls),
                             **get_arguments(_cls, with_kwargs),
                         ),
                     }
                 )
 
-        m = schema.ModelConfig(
+        m = ModelConfig(
             _target_=cls._target_(),
             _recursive_=False,
-            config=schema.ModelConfigBody(
+            config=ModelConfigBody(
                 networks=networks,
                 losses=losses,
                 optimizers=optimizers,

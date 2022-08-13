@@ -1,39 +1,40 @@
-from omegaconf import (
-    OmegaConf,
-    DictConfig,
-)
+from typing import Type
 
-from .common import (
+from omegaconf import DictConfig, OmegaConf
+
+from .pydantic import (
     Instantiable,
-    ModuleConfig,
-)
-from .model import (
+    LossConfig,
     ModelConfig,
     ModelConfigBody,
+    ModuleConfig,
     NetworkConfig,
-    WeightsConfig,
-    LossConfig,
     OptimizerConfig,
     SchedulerConfig,
+    WeightsConfig,
 )
+from .typing import LRScheduler, Module, Optimizer
 
 
-def validate(config: DictConfig, schema: ModelConfig):
-    config = OmegaConf.to_container(config)
-    _ = schema(**config)
+def validate(config: DictConfig, schema: Type[ModelConfig]):
+    _ = schema.parse_obj(OmegaConf.to_container(config))
 
 
 __all__ = (
-    # modules
-    Instantiable.__name__,
-    ModuleConfig.__name__,
-    ModelConfig.__name__,
-    ModelConfigBody.__name__,
-    NetworkConfig.__name__,
-    WeightsConfig.__name__,
-    LossConfig.__name__,
-    OptimizerConfig.__name__,
-    SchedulerConfig.__name__,
+    # pydantic
+    "Instantiable",
+    "LossConfig",
+    "ModelConfig",
+    "ModelConfigBody",
+    "ModuleConfig",
+    "NetworkConfig",
+    "OptimizerConfig",
+    "SchedulerConfig",
+    "WeightsConfig",
+    # typing
+    "LRScheduler",
+    "Module",
+    "Optimizer",
     # methods
-    validate.__name__,
+    "validate",
 )
