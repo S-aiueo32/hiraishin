@@ -8,7 +8,7 @@ license = "Apache 2.0"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-pytorch-lightning = "^1.5.10"
+pytorch-lightning = "^1.6.0"
 hydra-core = "1.1.1"
 pydantic = "^1.8.1"
 click = "^8.0.0"
